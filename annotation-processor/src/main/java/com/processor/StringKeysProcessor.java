@@ -1,5 +1,8 @@
 package com.processor;
 
+import com.annotation.StringKeysGenerator;
+import com.google.common.collect.ImmutableList;
+
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -7,7 +10,9 @@ import org.w3c.dom.NodeList;
 import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -16,7 +21,9 @@ import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
+import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
+import javax.lang.model.util.ElementFilter;
 import javax.tools.JavaFileObject;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -29,19 +36,36 @@ import javax.xml.parsers.DocumentBuilderFactory;
 @SupportedSourceVersion(SourceVersion.RELEASE_7)
 public class StringKeysProcessor extends AbstractProcessor {
 
-    public static final String GENERATED_CLASS_PACKAGE_NAME = "com.vladimir.generated";
-    public static final String GENERATED_CLASS_NAME = "TranslationKeys";
-    public static final String STRING_RESOURCES_PATH = "app/src/main/res/values/strings.xml";
+    private String generatedClassPackageName;
+    private String generatedClassName;
+    private String stringResourcesPath;
 
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
-        StringBuilder builder = new StringBuilder()
-            .append("package " + GENERATED_CLASS_PACKAGE_NAME + ";\n\n")
-            .append("/**\n * Generated class for string.xml keys \n **/\n")
-            .append("public class " + GENERATED_CLASS_NAME + " {\n\n");
+        StringBuilder builder = new StringBuilder();
 
+        Collection<? extends Element> annotatedElements = roundEnvironment.getElementsAnnotatedWith(StringKeysGenerator.class);
+        List<TypeElement> types = new ImmutableList.Builder<TypeElement>()
+            .addAll(ElementFilter.typesIn(annotatedElements))
+            .build();
+
+
+
+        if (types != null && !types.isEmpty()) {
+            TypeElement annotation = types.get(0);
+            generatedClassPackageName = annotation.getAnnotation(StringKeysGenerator.class).packageName();
+            generatedClassName = annotation.getAnnotation(StringKeysGenerator.class).className();
+            stringResourcesPath = annotation.getAnnotation(StringKeysGenerator.class).stringsPath();
+
+            builder.append("// Generated from annotation params ( packageName = " + generatedClassPackageName + ", className = " + generatedClassName + ", path = " + stringResourcesPath + " )\n");
+        }
+
+        builder.append("package " + generatedClassPackageName + ";\n\n");
+
+        builder.append("/**\n * Generated class for string.xml keys \n **/\n")
+            .append("public class " + generatedClassName + " {\n\n");
         try {
-            Map<String, String> keys = readStringsXML(builder);
+            Map<String, String> keys = readStringsXML();
             generateFields(builder, keys);
         } catch (Exception e) {
             builder.append("// Error generating class \n");
@@ -51,8 +75,7 @@ public class StringKeysProcessor extends AbstractProcessor {
         builder.append("}\n"); // close class
 
         try {
-            JavaFileObject source = processingEnv.getFiler().createSourceFile(GENERATED_CLASS_PACKAGE_NAME + "." + GENERATED_CLASS_NAME);
-
+            JavaFileObject source = processingEnv.getFiler().createSourceFile(generatedClassPackageName + "." + generatedClassName);
             Writer writer = source.openWriter();
             writer.write(builder.toString());
             writer.flush();
@@ -63,11 +86,11 @@ public class StringKeysProcessor extends AbstractProcessor {
         return true;
     }
 
-    private Map<String, String> readStringsXML(StringBuilder builder) throws Exception {
+    private Map<String, String> readStringsXML() throws Exception {
         Map<String, String> keys = new HashMap<>();
 
         File file = new File(new File
-            (STRING_RESOURCES_PATH).getAbsolutePath());
+            (stringResourcesPath).getAbsolutePath());
 
         DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance()
             .newDocumentBuilder();

@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">StringKeysGeneratorApp</string>
+    <string name="TEST_STRING_1">TEST String 1</string>
+    <string name="TEST_STRING_2">TEST String 2</string>
+    <string name="TEST_STRING_35">TEST String 3</string>
+
+    <string name="voucher_title">voucher title</string>
+</resources>

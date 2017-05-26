@@ -24,6 +24,7 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.util.ElementFilter;
+import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -44,38 +45,43 @@ public class StringKeysProcessor extends AbstractProcessor {
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
         StringBuilder builder = new StringBuilder();
 
-        Collection<? extends Element> annotatedElements = roundEnvironment.getElementsAnnotatedWith(StringKeysGenerator.class);
+        Collection<? extends Element> annotatedElements = roundEnvironment
+            .getElementsAnnotatedWith(StringKeysGenerator.class);
+
         List<TypeElement> types = new ImmutableList.Builder<TypeElement>()
             .addAll(ElementFilter.typesIn(annotatedElements))
             .build();
 
-
-
         if (types != null && !types.isEmpty()) {
-            TypeElement annotation = types.get(0);
-            generatedClassPackageName = annotation.getAnnotation(StringKeysGenerator.class).packageName();
-            generatedClassName = annotation.getAnnotation(StringKeysGenerator.class).className();
-            stringResourcesPath = annotation.getAnnotation(StringKeysGenerator.class).stringsPath();
 
-            builder.append("// Generated from annotation params ( packageName = " + generatedClassPackageName + ", className = " + generatedClassName + ", path = " + stringResourcesPath + " )\n");
+            TypeElement annotation = types.get(0);
+            getAnnotationParams(annotation);
+
+            processingEnv.getMessager()
+                .printMessage(Diagnostic.Kind.WARNING,
+                    "packageName = " + generatedClassPackageName
+                        + ", className = " + generatedClassName
+                        + ", path = " + stringResourcesPath
+                );
         }
 
-        builder.append("package " + generatedClassPackageName + ";\n\n");
+        generateClassHeaders(builder);
 
-        builder.append("/**\n * Generated class for string.xml keys \n **/\n")
-            .append("public class " + generatedClassName + " {\n\n");
         try {
             Map<String, String> keys = readStringsXML();
             generateFields(builder, keys);
         } catch (Exception e) {
-            builder.append("// Error generating class \n");
+            builder.append("// Error generating class ! \n");
             builder.append("// exception message = " + e + "\n");
+            processingEnv.getMessager()
+                .printMessage(Diagnostic.Kind.ERROR, "Error happened. Error Message : " + e.getMessage());
         }
 
-        builder.append("}\n"); // close class
+        generateClassFooter(builder);
 
         try {
-            JavaFileObject source = processingEnv.getFiler().createSourceFile(generatedClassPackageName + "." + generatedClassName);
+            JavaFileObject source = processingEnv.getFiler()
+                .createSourceFile(generatedClassPackageName + "." + generatedClassName);
             Writer writer = source.openWriter();
             writer.write(builder.toString());
             writer.flush();
@@ -86,17 +92,39 @@ public class StringKeysProcessor extends AbstractProcessor {
         return true;
     }
 
+    private void generateClassFooter(StringBuilder builder) {
+        builder.append("}\n");
+    }
+
+    private void generateClassHeaders(StringBuilder builder) {
+        builder.append("package " + generatedClassPackageName + ";\n\n");
+        builder.append("/**\n * Generated class for string.xml keys \n * \n");
+        builder.append(" * Generated from annotation params ( packageName = "
+            + generatedClassPackageName
+            + ", className = "
+            + generatedClassName
+            + ", path = " + stringResourcesPath
+            + " )\n"
+        );
+        builder.append("**/\n");
+        builder.append("public class " + generatedClassName + " {\n");
+    }
+
+    private void getAnnotationParams(TypeElement annotation) {
+        generatedClassPackageName = annotation.getAnnotation(StringKeysGenerator.class).packageName();
+        generatedClassName = annotation.getAnnotation(StringKeysGenerator.class).className();
+        stringResourcesPath = annotation.getAnnotation(StringKeysGenerator.class).stringsPath();
+    }
+
     private Map<String, String> readStringsXML() throws Exception {
         Map<String, String> keys = new HashMap<>();
 
-        File file = new File(new File
-            (stringResourcesPath).getAbsolutePath());
+        File file = new File(new File(stringResourcesPath).getAbsolutePath());
 
         DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance()
             .newDocumentBuilder();
         Document doc = dBuilder.parse(file);
 
-        //resources element
         org.w3c.dom.Element resourcesElement = doc.getDocumentElement();
         if (resourcesElement.hasChildNodes()) {
             printNote(resourcesElement.getChildNodes(), keys);
@@ -109,14 +137,23 @@ public class StringKeysProcessor extends AbstractProcessor {
         for (int count = 0; count < nodeList.getLength(); count++) {
             Node tempNode = nodeList.item(count);
             if (tempNode.getNodeType() == Node.ELEMENT_NODE) {
-                keys.put(tempNode.getAttributes().getNamedItem("name").getNodeValue(), tempNode.getTextContent());
+                keys.put(
+                    tempNode.getAttributes().getNamedItem("name").getNodeValue(),
+                    tempNode.getTextContent()
+                );
             }
         }
     }
 
     private void generateFields(StringBuilder builder, Map<String, String> keys) {
         for (Map.Entry<String, String> entry : keys.entrySet()) {
-            builder.append("\tpublic static final String " + entry.getKey() + " = \"" + entry.getKey() + "\";\n");
+            builder.append(
+                "\tpublic static final String "
+                    + entry.getKey()
+                    + " = \""
+                    + entry.getKey()
+                    + "\";\n"
+            );
         }
     }
 }

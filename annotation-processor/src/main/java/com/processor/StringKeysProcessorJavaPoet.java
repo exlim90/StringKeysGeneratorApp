@@ -44,7 +44,7 @@ public class StringKeysProcessorJavaPoet extends AbstractProcessor {
 
         try {
             Map<String, String> keys = readStringsXML();
-            generateFields(keys ,translationKeysClass);
+            generateFields(keys, translationKeysClass);
         } catch (Exception e) {
 
         }

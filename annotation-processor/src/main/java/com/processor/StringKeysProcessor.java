@@ -1,7 +1,9 @@
 package com.processor;
 
 import com.annotation.StringKeysGenerator;
-import com.google.common.collect.ImmutableList;
+import com.squareup.javapoet.FieldSpec;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.TypeSpec;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
@@ -9,7 +11,7 @@ import org.w3c.dom.NodeList;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.Writer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -22,10 +24,10 @@ import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.util.ElementFilter;
 import javax.tools.Diagnostic;
-import javax.tools.JavaFileObject;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
@@ -36,90 +38,86 @@ import javax.xml.parsers.DocumentBuilderFactory;
 @SupportedAnnotationTypes("com.annotation.StringKeysGenerator")
 @SupportedSourceVersion(SourceVersion.RELEASE_7)
 public class StringKeysProcessor extends AbstractProcessor {
-
-    private String generatedClassPackageName;
-    private String generatedClassName;
-    private String stringResourcesPath;
-
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
-        StringBuilder builder = new StringBuilder();
 
         Collection<? extends Element> annotatedElements = roundEnvironment
             .getElementsAnnotatedWith(StringKeysGenerator.class);
 
-        List<TypeElement> types = new ImmutableList.Builder<TypeElement>()
-            .addAll(ElementFilter.typesIn(annotatedElements))
-            .build();
+        List<TypeElement> types = new ArrayList<>(ElementFilter.typesIn(annotatedElements));
 
-        if (types != null && !types.isEmpty()) {
-
-            TypeElement annotation = types.get(0);
-            getAnnotationParams(annotation);
-
-            processingEnv.getMessager()
-                .printMessage(Diagnostic.Kind.WARNING,
-                    "packageName = " + generatedClassPackageName
-                        + ", className = " + generatedClassName
-                        + ", path = " + stringResourcesPath
-                );
-        }
-
-        generateClassHeaders(builder);
-
-        try {
-            Map<String, String> keys = readStringsXML();
-            generateFields(builder, keys);
-        } catch (Exception e) {
-            builder.append("// Error generating class ! \n");
-            builder.append("// exception message = " + e + "\n");
-            processingEnv.getMessager()
-                .printMessage(Diagnostic.Kind.ERROR, "Error happened. Error Message : " + e.getMessage());
-        }
-
-        generateClassFooter(builder);
-
-        try {
-            JavaFileObject source = processingEnv.getFiler()
-                .createSourceFile(generatedClassPackageName + "." + generatedClassName);
-            Writer writer = source.openWriter();
-            writer.write(builder.toString());
-            writer.flush();
-            writer.close();
-        } catch (IOException ignored) {
+        for (TypeElement element : types) {
+            processAnnotation(element);
         }
 
         return true;
     }
 
-    private void generateClassFooter(StringBuilder builder) {
-        builder.append("}\n");
+    private void processAnnotation(TypeElement element) {
+        AnnotationParams params = getAnnotationParams(element);
+
+        TypeSpec.Builder translationKeysClass = TypeSpec.classBuilder(params.className)
+            .addModifiers(Modifier.PUBLIC);
+
+        processingEnv.getMessager()
+            .printMessage(Diagnostic.Kind.WARNING,
+                "packageName = " + params.packageName
+                    + ", className = " + params.className
+                    + ", path = " + params.resourcesPath
+            );
+
+        translationKeysClass.addJavadoc(" Generated class \n");
+        translationKeysClass.addJavadoc(" Annotation params: packageName = " + params.packageName
+            + ", className = " + params.className
+            + ", path = " + params.resourcesPath);
+
+        try {
+            Map<String, String> keys = readStringsXML(params.resourcesPath);
+            generateFields(keys, translationKeysClass);
+        } catch (Exception e) {
+            processingEnv.getMessager()
+                .printMessage(Diagnostic.Kind.ERROR, "Error happened. Error Message : " + e.getMessage());
+        }
+
+        saveSourceFile(params, translationKeysClass);
     }
 
-    private void generateClassHeaders(StringBuilder builder) {
-        builder.append("package " + generatedClassPackageName + ";\n\n");
-        builder.append("/**\n * Generated class for string.xml keys \n * \n");
-        builder.append(" * Generated from annotation params ( packageName = "
-            + generatedClassPackageName
-            + ", className = "
-            + generatedClassName
-            + ", path = " + stringResourcesPath
-            + " )\n"
-        );
-        builder.append("**/\n");
-        builder.append("public class " + generatedClassName + " {\n");
+    private void saveSourceFile(AnnotationParams params, TypeSpec.Builder translationKeysClass) {
+        JavaFile javaFile = JavaFile.builder(params.packageName, translationKeysClass.build())
+            .build();
+
+        try {
+            javaFile.writeTo(processingEnv.getFiler());
+        } catch (IOException e) {
+            processingEnv.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                "Could not write generated class " + "" + ": " + e);
+        }
     }
 
-    private void getAnnotationParams(TypeElement annotation) {
-        generatedClassPackageName = annotation.getAnnotation(StringKeysGenerator.class).packageName();
-        generatedClassName = annotation.getAnnotation(StringKeysGenerator.class).className();
-        stringResourcesPath = annotation.getAnnotation(StringKeysGenerator.class).stringsPath();
+    private AnnotationParams getAnnotationParams(TypeElement annotation) {
+        AnnotationParams params = new AnnotationParams();
+        params.packageName = annotation.getAnnotation(StringKeysGenerator.class).packageName();
+        params.className = annotation.getAnnotation(StringKeysGenerator.class).className();
+        params.resourcesPath = annotation.getAnnotation(StringKeysGenerator.class).stringsPath();
+
+        return params;
     }
 
-    private Map<String, String> readStringsXML() throws Exception {
+
+    private void generateFields(Map<String, String> keys, TypeSpec.Builder translationKeysClass) {
+        for (Map.Entry<String, String> entry : keys.entrySet()) {
+            FieldSpec filed = FieldSpec.builder(String.class, entry.getKey())
+                .addModifiers(Modifier.PUBLIC, Modifier.FINAL,Modifier.STATIC)
+                .initializer("\"" + entry.getKey() + "\"")
+                .build();
+            translationKeysClass.addField(filed);
+        }
+    }
+
+    private Map<String, String> readStringsXML(String resourcePath) throws Exception {
         Map<String, String> keys = new HashMap<>();
 
-        File file = new File(new File(stringResourcesPath).getAbsolutePath());
+        File file = new File(new File(resourcePath).getAbsolutePath());
 
         DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance()
             .newDocumentBuilder();
@@ -137,23 +135,14 @@ public class StringKeysProcessor extends AbstractProcessor {
         for (int count = 0; count < nodeList.getLength(); count++) {
             Node tempNode = nodeList.item(count);
             if (tempNode.getNodeType() == Node.ELEMENT_NODE) {
-                keys.put(
-                    tempNode.getAttributes().getNamedItem("name").getNodeValue(),
-                    tempNode.getTextContent()
-                );
+                keys.put(tempNode.getAttributes().getNamedItem("name").getNodeValue(), tempNode.getTextContent());
             }
         }
     }
 
-    private void generateFields(StringBuilder builder, Map<String, String> keys) {
-        for (Map.Entry<String, String> entry : keys.entrySet()) {
-            builder.append(
-                "\tpublic static final String "
-                    + entry.getKey()
-                    + " = \""
-                    + entry.getKey()
-                    + "\";\n"
-            );
-        }
+    public static class AnnotationParams {
+        String className;
+        String packageName;
+        String resourcesPath;
     }
 }
